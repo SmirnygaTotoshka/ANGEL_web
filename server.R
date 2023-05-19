@@ -24,20 +24,21 @@ shinyServer(function(input, output, session) {
     pass_server = server_config["pass_server","V2"]
     pass_passwd = server_config["pass_server_password","V2"]
     uuid = str_replace_all(UUIDgenerate(output = "string"),"-","_")
-    input.dst = file.path(server_config["userdata_path","V2"],paste0(uuid,".txt"))
+    input.dst = file.path(server_config["userdata_path","V2"],paste0(uuid,".csv"))
     run.logs = file.path(server_config["userdata_path","V2"],"logs",paste0(uuid,".log"))
     track_usage(storage_mode = store_json(path = file.path(server_config["userdata_path","V2"],"shiny")))
     
     
-    final.result = reactiveVal(NULL)
-    result.ui = reactiveValues(
-        labels = NULL,
-        tables = NULL
+    final.result = reactiveValues(
+        proteasome = NULL,
+        TAP = NULL,
+        HLA = NULL
     )
+
 
     write.input.to.file = function(sequences){
         fileConn<-file(input.dst)
-        writeLines(sequences, fileConn)
+        writeLines(c("proteins",sequences), fileConn)
         close(fileConn)
     }
     
@@ -73,7 +74,7 @@ shinyServer(function(input, output, session) {
                 write.input.to.file(sequences)
             }
             #Проверить вход
-            input.seqs = readLines(input.dst)
+            input.seqs = read.csv2(input.dst)$proteins
             if (check.input(input.seqs)){
                 disable("apply")
                 disable("reset")
@@ -83,28 +84,38 @@ shinyServer(function(input, output, session) {
                     set_status("Запуск")
                     workdir = paste0(server_config["pass_root","V2"],"\\", uuid)
                     ssh_exec_wait(ssh.session, paste("mkdir",workdir))
-                    scp_upload(ssh.session, input.dst, to = paste0(uuid,".txt"))#WARNING Cannot directly move to needed folder
-                    ssh_exec_wait(ssh.session, paste("move",paste0("'",uuid,".txt'"), workdir))
+                    scp_upload(ssh.session, input.dst, to = paste0(uuid,".csv"))#WARNING Cannot directly move to needed folder
+                    ssh_exec_wait(ssh.session, paste("move",paste0("'",uuid,".csv'"), workdir))
                     ssh_exec_wait(ssh.session, paste("cd",workdir))
                     launch.cmd.with.waiting(ssh.session,command = paste0("python ",server_config["python_scripts","V2"],"\\renameInput.py ",workdir),
                                             success_status = "Входные последовательности получены.")#Убрать эти кавычки странные
-                    data.frame(matrix(1:10,nrow = 5))
-                }) %...>% final.result()
+                    remote.input.path = paste0(workdir,"\\", uuid, ".csv")
+                    path_to_config = paste0(workdir,"\\", uuid, ".json")
+                    launch.cmd.with.waiting(ssh.session,command = paste0("python ",server_config["python_scripts","V2"],"\\generateConfigForConverter.py -i ",
+                                                                         remote.input.path," -o ", workdir," -c proteins -u -t 5 ",path_to_config),
+                                            success_status = "Есть конфигурация для конвертера.")
+                    launch.cmd.with.waiting(ssh.session,command = paste0("python ",server_config["python_scripts","V2"],"\\SeqToSDF.py ",path_to_config),
+                                            success_status = "Сконвертировано в SDF.")
+                   
+                    final.result$proteasome = data.frame(matrix(1:10,nrow = 5))
+                    final.result$TAP = data.frame(matrix(1:10,nrow = 5))
+                    final.result$HLA = data.frame(matrix(1:10,nrow = 5))
+                })
                 
                 # Catch inturrupt (or any other error) and notify user
                 result <- catch(result,
                                 function(e){
                                     final.result(NULL)
                                     set_status(paste("Ошибка",e$message))
-                                    stop(e)
                                 })
                 
                 # After the promise has been evaluated set nclicks to 0 to allow for anlother Run
                 result <- finally(result,
                                   function(){
                                       tryCatch({
-                                          launch.cmd.with.waiting(ssh.session,command = paste0("python ",server_config["python_scripts","V2"],"\\deleteRemote.py ",uuid),
-                                                              success_status = "Очищено.")
+                                          file.remove(input.dst)
+                                          #launch.cmd.with.waiting(ssh.session,command = paste0("python ",server_config["python_scripts","V2"],"\\deleteRemote.py ",uuid),
+                                          #                    success_status = "Очищено.")
                                           ssh_disconnect(ssh.session)
                                       },
                                       error = function(e){
@@ -137,9 +148,20 @@ shinyServer(function(input, output, session) {
         get_status() %>% tail(30)
     },sep = "\n")
     
-    output$result = renderTable({
-        validate(need(final.result(), message = "Запустите программу."))
-        final.result()
+    
+    output$result.proteasome = renderDataTable({
+        validate(need(final.result$proteasome, message = "Запустите программу."))
+        final.result$proteasome
+    })
+    
+    output$result.TAP = renderDataTable({
+        validate(need(final.result$TAP, message = "Запустите программу."))
+        final.result$TAP
+    })
+    
+    output$result.HLA = renderDataTable({
+        validate(need(final.result$HLA, message = "Запустите программу."))
+        final.result$HLA
     })
     
     observeEvent(input$reset,{
@@ -155,8 +177,8 @@ shinyServer(function(input, output, session) {
     } 
     
     session$onSessionEnded(function() {
-        file.remove(input.dst)
-        file.remove(run.logs)
+        #file.remove(input.dst)
+        #file.remove(run.logs)
         stopOnRemote()
         print(paste(uuid, 'the session has ended'))
     })
