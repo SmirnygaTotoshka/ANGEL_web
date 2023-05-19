@@ -15,14 +15,13 @@ ui <- tagList(
     useShinyjs(),
     navbarPage("ANGEL",
                #rmarkdown::render("intro_rus.Rmd", rmarkdown::html_document(toc = TRUE,toc_float = T))
-               #tabPanel("Введение", fluidPage(htmlOutput("intro"))),
+               tabPanel("Введение", fluidPage(htmlOutput("intro"))),
                tabPanel("Сервис",
                         fluidPage(
                             sidebarLayout(
                                 sidebarPanel(
                                     wellPanel(
                                         textAreaInput("input.text",label = "Введите последовательности (1 на строку)"),
-                                        fileInput("input.file",label = "Загрузите файл (fasta формат)")
                                     ),
                                     wellPanel(
                                         sliderInput("proteasome.threshold", label="Порог для протеасомы", min = 0, max = 1, step = 0.01, value = 0.5),#TODO - change value to optimal
@@ -32,8 +31,8 @@ ui <- tagList(
                                     checkboxInput("include.TAP",label = "Следует ли учитывать прогноз для TAP?", value = T),
                                     wellPanel(
                                         fluidRow(
-                                            column(4, align = "center", disabled(actionButton("apply",label = "Запустить"))),
-                                            column(4, align = "center", disabled(actionButton("reset",label = "Очистить"))),
+                                            column(4, align = "center", actionButton("apply",label = "Запустить")),
+                                            column(4, align = "center", actionButton("reset",label = "Очистить")),
                                             column(4, align = "center", disabled(downloadButton("download", label = "Скачать")))
                                         )
                                     )
