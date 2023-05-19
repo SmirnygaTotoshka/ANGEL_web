@@ -53,8 +53,8 @@ shinyServer(function(input, output, session) {
         write(paste(msg, format(Sys.time(), "%a %b %d %X %Y")), run.logs,append = T)
     }
     
-    launch.cmd.with.waiting = function(command,success_status){
-        out = ssh_exec_internal(ssh.session, command)
+    launch.cmd.with.waiting = function(ssh, command,success_status){
+        out = ssh_exec_internal(ssh, command)
         if (out$status == 0){
             set_status(success_status)
         }
@@ -86,7 +86,7 @@ shinyServer(function(input, output, session) {
                     scp_upload(ssh.session, input.dst, to = paste0(uuid,".txt"))#WARNING Cannot directly move to needed folder
                     ssh_exec_wait(ssh.session, paste("move",paste0("'",uuid,".txt'"), workdir))
                     ssh_exec_wait(ssh.session, paste("cd",workdir))
-                    launch.cmd.with.waiting(command = paste0("python ",server_config["python_scripts","V2"],"\\renameInput.py ",workdir),
+                    launch.cmd.with.waiting(ssh.session,command = paste0("python ",server_config["python_scripts","V2"],"\\renameInput.py ",workdir),
                                             success_status = "Входные последовательности получены.")#Убрать эти кавычки странные
                     data.frame(matrix(1:10,nrow = 5))
                 }) %...>% final.result()
@@ -102,9 +102,14 @@ shinyServer(function(input, output, session) {
                 # After the promise has been evaluated set nclicks to 0 to allow for anlother Run
                 result <- finally(result,
                                   function(){
-                                      # launch.cmd.with.waiting(command = paste0("python ",server_config["python_scripts","V2"],"\\deleteRemote.py ",uuid),
-                                      #                         success_status = "Очищено.")
-                                      ssh_disconnect(ssh.session)
+                                      tryCatch({
+                                          launch.cmd.with.waiting(ssh.session,command = paste0("python ",server_config["python_scripts","V2"],"\\deleteRemote.py ",uuid),
+                                                              success_status = "Очищено.")
+                                          ssh_disconnect(ssh.session)
+                                      },
+                                      error = function(e){
+                                          set_status(paste("Ошибка",e$message))
+                                      })
                                       set_status("Завершено")
                                       enable("apply")
                                       enable("reset")
