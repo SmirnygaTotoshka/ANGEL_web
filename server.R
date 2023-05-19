@@ -10,16 +10,31 @@
 library(shiny)
 library(shinyalert)
 library(shinylogs)
-library(seqinr)
+library(stringr)
+library(dplyr)
+library(promises)
+library(ssh)
+library(future)
 library(uuid)
+Sys.setlocale(category = "LC_ALL", locale = "ru_RU.UTF-8")
 # Define server logic required to draw a histogram
 shinyServer(function(input, output, session) {
     
-    track_usage(storage_mode = store_json(path = "logs/"))
     server_config = read.table("/home/stotoshka/server_config.txt",sep="=",row.names = 1)
-    uuid = UUIDgenerate(output = "string")
+    pass_server = server_config["pass_server","V2"]
+    pass_passwd = server_config["pass_server_password","V2"]
+    uuid = str_replace_all(UUIDgenerate(output = "string"),"-","_")
     input.dst = file.path(server_config["userdata_path","V2"],paste0(uuid,".txt"))
+    run.logs = file.path(server_config["userdata_path","V2"],"logs",paste0(uuid,".log"))
+    track_usage(storage_mode = store_json(path = file.path(server_config["userdata_path","V2"],"shiny")))
     
+    
+    final.result = reactiveVal(NULL)
+    result.ui = reactiveValues(
+        labels = NULL,
+        tables = NULL
+    )
+
     write.input.to.file = function(sequences){
         fileConn<-file(input.dst)
         writeLines(sequences, fileConn)
@@ -28,6 +43,27 @@ shinyServer(function(input, output, session) {
     
     check.input = function(sequences){
         all(grepl("^[ACDEFGHIKLMNPQRSTVWY]+$",sequences))
+    }
+    
+    get_status <- function(){
+        scan(run.logs, what = "character",sep="\n")
+    }
+    
+    set_status <- function(msg){
+        write(paste(msg, format(Sys.time(), "%a %b %d %X %Y")), run.logs,append = T)
+    }
+    
+    launch.cmd.with.waiting = function(command,success_status){
+        out = ssh_exec_internal(ssh.session, command)
+        if (out$status == 0){
+            set_status(success_status)
+        }
+        else{
+            set_status("Error")
+            set_status(rawToChar(out$stdout))
+            set_status(rawToChar(out$stderr))
+            stop("Error. See log.")
+        }
     }
     
     observeEvent(input$apply,{
@@ -39,10 +75,43 @@ shinyServer(function(input, output, session) {
             #Проверить вход
             input.seqs = readLines(input.dst)
             if (check.input(input.seqs)){
-                shinyalert("Debug",
-                           "Good input",
-                           type = "info"
-                )
+                disable("apply")
+                disable("reset")
+                ssh.session = ssh_connect(pass_server, passwd = pass_passwd)
+
+                result <- future({
+                    set_status("Запуск")
+                    workdir = paste0(server_config["pass_root","V2"],"\\", uuid)
+                    ssh_exec_wait(ssh.session, paste("mkdir",workdir))
+                    scp_upload(ssh.session, input.dst, to = paste0(uuid,".txt"))#WARNING Cannot directly move to needed folder
+                    ssh_exec_wait(ssh.session, paste("move",paste0("'",uuid,".txt'"), workdir))
+                    ssh_exec_wait(ssh.session, paste("cd",workdir))
+                    launch.cmd.with.waiting(command = paste0("python ",server_config["python_scripts","V2"],"\\renameInput.py ",workdir),
+                                            success_status = "Входные последовательности получены.")#Убрать эти кавычки странные
+                    data.frame(matrix(1:10,nrow = 5))
+                }) %...>% final.result()
+                
+                # Catch inturrupt (or any other error) and notify user
+                result <- catch(result,
+                                function(e){
+                                    final.result(NULL)
+                                    set_status(paste("Ошибка",e$message))
+                                    stop(e)
+                                })
+                
+                # After the promise has been evaluated set nclicks to 0 to allow for anlother Run
+                result <- finally(result,
+                                  function(){
+                                      # launch.cmd.with.waiting(command = paste0("python ",server_config["python_scripts","V2"],"\\deleteRemote.py ",uuid),
+                                      #                         success_status = "Очищено.")
+                                      ssh_disconnect(ssh.session)
+                                      set_status("Завершено")
+                                      enable("apply")
+                                      enable("reset")
+                                  })
+                
+                # Return something other than the promise so shiny remains responsive
+                NULL
             }
             else{
                 stop("Incorrect input. Sequences must be written in one-letter code.")
@@ -50,10 +119,22 @@ shinyServer(function(input, output, session) {
         },
         error = function(e){
             shinyalert("Error",
-                       paste("Не могу считать данные, потому что",e),
+                       paste("Ошибка: ",e),
                        type = "error"
             )
         })
+    })
+    
+    output$angel.logs <- renderText({
+        ### 1sec refresh
+        invalidateLater(1000, session)
+        validate(need(file.exists(run.logs), message = "Запустите программу."))
+        get_status() %>% tail(30)
+    },sep = "\n")
+    
+    output$result = renderTable({
+        validate(need(final.result(), message = "Запустите программу."))
+        final.result()
     })
     
     observeEvent(input$reset,{
@@ -64,8 +145,14 @@ shinyServer(function(input, output, session) {
         )
     })
     
+    stopOnRemote = function(){
+        
+    } 
+    
     session$onSessionEnded(function() {
         file.remove(input.dst)
+        file.remove(run.logs)
+        stopOnRemote()
         print(paste(uuid, 'the session has ended'))
     })
 })

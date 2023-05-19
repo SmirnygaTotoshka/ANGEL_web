@@ -9,7 +9,6 @@
 
 library(shiny)
 library(shinyjs)
-library(shinyTree)
 
 ui <- tagList(
     useShinyjs(),
@@ -38,7 +37,8 @@ ui <- tagList(
                                     )
                                 ),
                                 mainPanel(
-                                    shinyTree("result")
+                                    verbatimTextOutput("angel.logs"),
+                                    tableOutput("result")
                                 )
                             )
                         ))
