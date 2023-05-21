@@ -42,9 +42,6 @@ ui <- tagList(
                                     h3("Протеасома"),
                                     dataTableOutput("result.proteasome"),
                                     hr(),
-                                    h3("TAP"),
-                                    dataTableOutput("result.TAP"),
-                                    hr(),
                                     h3("HLA"),
                                     dataTableOutput("result.HLA")
                                 )
