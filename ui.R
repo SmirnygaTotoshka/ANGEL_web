@@ -24,7 +24,7 @@ ui <- tagList(
                                     ),
                                     wellPanel(
                                         sliderInput("proteasome.threshold", label="Порог для протеасомы", min = 0, max = 1, step = 0.01, value = 0.5),#TODO - change value to optimal
-                                        sliderInput("TAP.threshold", label="Порог для TAP", min = 0, max = 1, step = 0.01, value = 0.5),#TODO - change value to optimal
+                                        #sliderInput("TAP.threshold", label="Порог для TAP", min = 0, max = 1, step = 0.01, value = 0.5),#TODO - change value to optimal
                                         sliderInput("HLA.threshold", label="Порог для HLA", min = 0, max = 1, step = 0.01, value = 0.5),#TODO - change value to optimal
                                     ),
                                     checkboxInput("include.TAP",label = "Следует ли учитывать прогноз для TAP?", value = T),
